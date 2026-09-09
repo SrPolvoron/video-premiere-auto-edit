@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import json
+import logging
 import socket
 import subprocess
 import time
@@ -13,10 +14,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import AbstractContextManager
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from .util import AutoEditorError, digest, finite
+
+LOGGER = logging.getLogger(__name__)
 
 STAGES = {"establishing", "preparation", "departure", "action", "detail", "pause", "arrival", "closing", "unknown"}
 SHOTS = {"wide", "medium", "close", "detail", "pov", "unknown"}
@@ -171,12 +175,15 @@ class LocalModel(AbstractContextManager):
             if response.status != 200:
                 raise AutoEditorError("Local model is not ready.")
 
-    def chat(self, system: str, content: str | list[dict]) -> dict:
+    def chat(self, system: str, content: str | list[dict], *, schema: dict | None = None) -> dict:
+        response_format = {"type": "json_object"}
+        if schema is not None:
+            response_format["schema"] = schema
         body = json.dumps({
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": content}],
             "temperature": 0, "seed": 0, "max_tokens": self.config["max_tokens"],
-            "response_format": {"type": "json_object"},
+            "response_format": response_format,
         }).encode()
         request = urllib.request.Request(
             self.endpoint + "/chat/completions", data=body,
@@ -208,12 +215,90 @@ class LocalModel(AbstractContextManager):
             content.append({"type": "text", "text": f"Frame at {timestamp:.3f} seconds:"})
             encoded = base64.b64encode(path.read_bytes()).decode("ascii")
             content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + encoded}})
-        return validate_actions(self.chat(ACTION_SYSTEM, content), duration)
+        payload = self.chat(ACTION_SYSTEM, content)
+        try:
+            return validate_actions(payload, duration)
+        except AutoEditorError as exc:
+            # Only rejected annotations use recovery, so completed windows stay reusable.
+            # llama.cpp constrains integer bounds in JSON schemas, but not float bounds.
+            limit_ms = int(Decimal(str(duration)) * 1000)
+            LOGGER.warning("Invalid model annotation (%s); retrying with constrained timestamps.", exc)
+            retry_content = list(content)
+            retry_content[0] = {"type": "text", "text": (
+                f"Window length: {limit_ms} milliseconds. "
+                "Return a fresh annotation using start_ms, end_ms and anchor_ms, "
+                "all INTEGER MILLISECONDS RELATIVE to this window. "
+                f"Use 0 <= start_ms < end_ms <= {limit_ms}; "
+                "end_ms - start_ms must be at least 150. "
+                "start_ms <= anchor_ms <= end_ms. "
+                f"For the window end use exactly {limit_ms}. "
+                "Keep label, stage, shot, interest, confidence and tags as usual. "
+                "Ordered frames:"
+            )}
+            for index, (timestamp, _) in enumerate(frames):
+                retry_content[1 + 2 * index] = {"type": "text", "text": (
+                    f"Frame at {int(Decimal(str(timestamp)) * 1000)} milliseconds:"
+                )}
+            retry_system = ACTION_SYSTEM.replace(
+                "start, end, anchor (seconds RELATIVE to this window)",
+                "start_ms, end_ms, anchor_ms (integer milliseconds RELATIVE to this window)",
+            ).replace(
+                "Anchor is the representative visual moment inside start..end.",
+                "anchor_ms is the representative visual moment inside start_ms..end_ms.",
+            )
+            try:
+                result = self.chat(retry_system, retry_content, schema=millisecond_action_schema(limit_ms))
+                return validate_millisecond_actions(result, duration, limit_ms)
+            except AutoEditorError as retry_exc:
+                raise AutoEditorError(f"Model annotation invalid after one retry: {retry_exc}") from retry_exc
 
     def intent(self, prompt: str) -> dict:
         if not prompt.strip() or len(prompt) > 8000:
             raise AutoEditorError("Prompt must contain 1..8000 characters.")
         return validate_intent(self.chat(INTENT_SYSTEM, prompt))
+
+
+
+def millisecond_action_schema(limit_ms: int) -> dict:
+    """Constrain recovery generation without accepting or clamping invalid seconds."""
+    properties = {
+        "start_ms": {"type": "integer", "minimum": 0, "maximum": limit_ms - 150},
+        "end_ms": {"type": "integer", "minimum": 150, "maximum": limit_ms},
+        "anchor_ms": {"type": "integer", "minimum": 0, "maximum": limit_ms},
+        "label": {"type": "string", "minLength": 1, "maxLength": 160},
+        "stage": {"type": "string", "enum": sorted(STAGES)},
+        "shot": {"type": "string", "enum": sorted(SHOTS)},
+        "interest": {"type": "number"},
+        "confidence": {"type": "number"},
+        "tags": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 80}},
+    }
+    return {
+        "type": "object", "additionalProperties": False, "required": ["segments"],
+        "properties": {"segments": {
+            "type": "array", "maxItems": 20,
+            "items": {"type": "object", "properties": properties,
+                      "required": list(properties), "additionalProperties": False},
+        }},
+    }
+
+
+def validate_millisecond_actions(payload: dict, duration: float, limit_ms: int) -> list[dict]:
+    """Validate independently of the server grammar, then convert units to seconds."""
+    rows = payload.get("segments")
+    if not isinstance(rows, list) or len(rows) > 20:
+        raise AutoEditorError("Model segments must be a list with at most 20 entries.")
+    converted = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise AutoEditorError("Each model segment must be an object.")
+        item = dict(row)
+        for key in ("start", "end", "anchor"):
+            value = item.pop(key + "_ms", None)
+            if type(value) is not int or not 0 <= value <= limit_ms:
+                raise AutoEditorError(f"{key}_ms must be an integer between 0 and {limit_ms}.")
+            item[key] = value / 1000
+        converted.append(item)
+    return validate_actions({"segments": converted}, duration)
 
 
 def validate_actions(payload: dict, duration: float) -> list[dict]:
@@ -224,8 +309,13 @@ def validate_actions(payload: dict, duration: float) -> list[dict]:
     for item in rows:
         if not isinstance(item, dict):
             raise AutoEditorError("Each model segment must be an object.")
-        start = finite(item.get("start"), "start", 0, duration)
-        end = finite(item.get("end"), "end", 0, duration)
+        try:
+            start = finite(item.get("start"), "start", 0, duration)
+            end = finite(item.get("end"), "end", 0, duration)
+        except AutoEditorError as exc:
+            raise AutoEditorError(
+                f"{exc} Received start={item.get('start')!r}, end={item.get('end')!r}."
+            ) from exc
         if end - start < 0.15:
             raise AutoEditorError("Model segment is empty or shorter than 0.15 seconds.")
         anchor = finite(item.get("anchor", (start + end) / 2), "anchor", start, end)

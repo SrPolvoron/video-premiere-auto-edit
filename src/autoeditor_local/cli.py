@@ -62,6 +62,7 @@ def _export_options(parser):
     parser.add_argument("--output", type=Path)
     parser.add_argument("--allow-unverified-timing", action="store_true",
                         help="EXPERIMENTAL: export mixed FPS/VFR for a manual Premiere import test")
+    parser.add_argument("--source-fps", help="EXPERIMENTAL: interpret all source timings at this FPS in XML only; requires --allow-unverified-timing")
     parser.add_argument("--overwrite", action="store_true", help="overwrite an existing generated XML/JSON export")
     parser.add_argument("--verify-media", action="store_true", help="rehash all originals before export")
 
@@ -171,8 +172,10 @@ def _plan(args, project: Project, model) -> dict:
 
 def _export(args, project, plan):
     xml, report = export_plan(project, plan, args.output, args.allow_unverified_timing,
-                              args.overwrite, args.verify_media)
-    return {"xml": str(xml), "report": str(report), "plan": plan["id"], "warnings": plan["warnings"]}
+                              args.overwrite, args.verify_media, source_fps_override=args.source_fps)
+    timing_warnings = read_json(report)["export_validation"]["timing_warnings"]
+    return {"xml": str(xml), "report": str(report), "plan": plan["id"],
+            "warnings": list(dict.fromkeys(plan["warnings"] + timing_warnings))}
 
 
 def dispatch(args):

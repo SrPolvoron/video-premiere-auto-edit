@@ -51,6 +51,22 @@ format versions; mark compatibility as verified only for combinations actually e
 .\.venv\Scripts\autoeditor.exe export .\work\route --allow-unverified-timing
 ```
 
+If a source average rate cannot be represented in xmeml (for example
+`742343/24665`), the plan is still saved. For a manual import trial, explicitly choose
+the rate at which **all source in/out times** should be represented:
+
+```powershell
+.\.venv\Scripts\autoeditor.exe export .\work\route --allow-unverified-timing --source-fps 30
+```
+
+This is an XML timing interpretation only. It does not transcode or conform VFR, change
+originals, modify the saved plan, or rerun analysis. The original measured/nominal rates
+and the chosen XML rates are recorded in `export_validation.source_rate_interpretations`.
+An explicit override always requires the experimental flag, even if it matches the sequence.
+Source video and linked source audio use the same interpreted rate; music keeps the
+sequence rate. Check cut boundaries, playback speed and audio synchronization in Premiere.
+If the trial drifts, conforming separate copies or timestamp-aware mapping remains necessary.
+
 Review all timing warnings in the companion JSON. If importing at a different drive letter:
 
 ```powershell

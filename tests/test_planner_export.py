@@ -186,3 +186,67 @@ def test_no_accidental_speed_change_in_xml(catalog_project):
     root = ET.parse(xml).getroot()
     for clip in root.findall("./sequence/media/video/track/clipitem"):
         assert int(clip.findtext("out")) - int(clip.findtext("in")) == int(clip.findtext("end")) - int(clip.findtext("start"))
+
+
+def test_unrepresentable_source_rate_explains_recovery(catalog_project):
+    plan = create_plan(catalog_project, duration=4)
+    plan["clips"][0]["metadata"]["fps"] = "742343/24665"
+    for allow in (False, True):
+        with pytest.raises(AutoEditorError, match="--source-fps RATE"):
+            export_plan(catalog_project, plan, allow_unverified_timing=allow)
+    assert not list((catalog_project.root / "exports").glob("*.xml"))
+
+
+def test_source_rate_override_requires_explicit_trial(catalog_project):
+    plan = create_plan(catalog_project, duration=4)
+    with pytest.raises(AutoEditorError, match="requires --allow-unverified-timing"):
+        export_plan(catalog_project, plan, source_fps_override="30")
+    with pytest.raises(AutoEditorError, match="cannot be represented"):
+        export_plan(catalog_project, plan, allow_unverified_timing=True, source_fps_override="742343/24665")
+
+
+@pytest.mark.parametrize("override", ["30", "30000/1001"])
+def test_source_rate_override_preserves_plan_media_and_audio_links(catalog_project, override):
+    # Metadata fixture only: this is not actual VFR/Premiere validation.
+    for media in catalog_project.media():
+        meta = media["metadata"]
+        meta.update(fps="742343/24665", nominal_fps="5625/187", vfr_suspected=True)
+        with catalog_project.db:
+            catalog_project.db.execute("UPDATE media SET metadata=? WHERE id=?", (json.dumps(meta), media["id"]))
+    plan = create_plan(catalog_project, duration=10)
+    snapshot = json.dumps(plan, sort_keys=True)
+    before = {p.name: file_hash(p) for p in catalog_project.media_root.glob("*.mp4")}
+    xml, report_path = export_plan(catalog_project, plan, allow_unverified_timing=True, source_fps_override=override)
+    assert json.dumps(plan, sort_keys=True) == snapshot
+    assert load_plan(catalog_project, plan["id"]) == plan
+    assert before == {p.name: file_hash(p) for p in catalog_project.media_root.glob("*.mp4")}
+    report = json.loads(report_path.read_text())
+    assert report["clips"] == plan["clips"]
+    records = report["export_validation"]["source_rate_interpretations"]
+    assert all(r["measured_fps"] == "742343/24665" and r["xml_fps"] == override for r in records.values())
+    assert report["export_validation"]["premiere_import_tested"] is False
+    root = ET.parse(xml).getroot()
+    expected_timebase, expected_ntsc = xml_rate(Fraction(override))
+    for rate in root.findall(".//clipitem/rate") + root.findall(".//file/rate"):
+        assert rate.findtext("timebase") == str(expected_timebase)
+        assert rate.findtext("ntsc") == ("TRUE" if expected_ntsc else "FALSE")
+    clips_by_id = {c.attrib["id"]: c for c in root.findall(".//clipitem")}
+    for video in root.findall("./sequence/media/video/track/clipitem"):
+        assert 0 <= int(video.findtext("in")) < int(video.findtext("out")) <= int(video.findtext("duration"))
+        if override == "30":
+            assert int(video.findtext("out")) - int(video.findtext("in")) == int(video.findtext("end")) - int(video.findtext("start"))
+        for reference in video.findall("link/linkclipref"):
+            linked = clips_by_id[reference.text]
+            for tag in ("in", "out", "start", "end"):
+                assert linked.findtext(tag) == video.findtext(tag)
+
+
+def test_cli_exports_saved_plan_without_loading_model(catalog_project, capsys):
+    from autoeditor_local.cli import main
+
+    plan = create_plan(catalog_project, duration=4)
+    assert main(["export", str(catalog_project.root), "--allow-unverified-timing", "--source-fps", "30"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["plan"] == plan["id"]
+    assert any("explicitly interpreted" in warning for warning in output["warnings"])
+    assert catalog_project.db.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 1

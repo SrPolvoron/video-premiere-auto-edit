@@ -141,18 +141,41 @@ def _links(elements: list[tuple[ET.Element, str, int, int]]):
 
 def export_plan(project: Project, plan: dict, output: Path | None = None,
                 allow_unverified_timing: bool = False, overwrite: bool = False,
-                verify_media: bool = False) -> tuple[Path, Path]:
+                verify_media: bool = False, source_fps_override: str | None = None) -> tuple[Path, Path]:
     validate_plan(plan)
     sequence = plan["sequence"]
     fps = fps_fraction(sequence["fps"])
     xml_rate(fps)
+    override_rate = fps_fraction(source_fps_override) if source_fps_override is not None else None
+    if override_rate is not None:
+        if not allow_unverified_timing:
+            raise AutoEditorError("--source-fps requires --allow-unverified-timing for a manual Premiere import test.")
+        xml_rate(override_rate)
     paths = {}
+    source_rates = {}
+    interpretations = {}
     inventory = {m["relative_path"]: m for m in project.media()}
     timing_issues = []
     for c in plan["clips"]:
         meta = c["metadata"]
-        source_rate = fps_fraction(meta["fps"])
-        xml_rate(source_rate)
+        measured_rate = fps_fraction(meta["fps"])
+        source_rate = override_rate if override_rate is not None else measured_rate
+        try:
+            xml_rate(source_rate)
+        except AutoEditorError as exc:
+            raise AutoEditorError(
+                f"Export paused for {c['relative_path']}: {exc} "
+                "The plan is saved. For a manual Premiere import test, use export with "
+                "--allow-unverified-timing --source-fps RATE to explicitly interpret source timing. "
+                "This does not conform variable-frame-rate media."
+            ) from exc
+        source_rates[c["relative_path"]] = source_rate
+        if override_rate is not None:
+            timing_issues.append(f"source timing explicitly interpreted at {source_rate} fps; VFR not conformed")
+            interpretations[c["relative_path"]] = {
+                "measured_fps": meta["fps"], "nominal_fps": meta.get("nominal_fps"),
+                "xml_fps": str(source_rate), "method": "explicit-source-fps-override",
+            }
         if source_rate != fps:
             timing_issues.append("source/sequence frame-rate mismatch")
         if meta.get("vfr_suspected"):
@@ -197,7 +220,7 @@ def export_plan(project: Project, plan: dict, output: Path | None = None,
     defined: set[str] = set()
     for index, c in enumerate(plan["clips"], start=1):
         meta = c["metadata"]
-        source_fps = fps_fraction(meta["fps"])
+        source_fps = source_rates[c["relative_path"]]
         args = (c["label"], meta, source_fps, c["timeline_start"], c["timeline_end"], c["source_in"], c["source_out"])
         v = _clip(video_track, f"v-{index}", *args, "video")
         _file(v, f"file-{c['media_id']}", paths[c["relative_path"]], meta, source_fps, defined)
@@ -251,6 +274,7 @@ def export_plan(project: Project, plan: dict, output: Path | None = None,
     report["export_validation"] = {
         "structurally_checked": True, "premiere_import_tested": False,
         "timing_warnings": sorted(set(timing_issues)),
+        "source_rate_interpretations": interpretations,
         "scaling": "fit-with-letterboxing; validate rotation and Basic Motion on import",
     }
     atomic_text(destination, xml)

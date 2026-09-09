@@ -56,6 +56,14 @@ This deliberately pauses after two newly completed windows. Rerun without `--max
 finish. `catalog --include-partial` permits inspection before completion; normal planning does
 not use partial results. Runtime diagnostics are in the project's ignored `logs/llama.log`.
 
+Invalid segment annotations get one recovery request using integer millisecond timestamps,
+with per-window bounds enforced through llama.cpp's JSON-schema grammar. The application
+also validates the response independently, including segment order and anchor bounds.
+The recovery end limit is rounded down by less than one millisecond; invalid original
+responses are rejected, not clamped. If recovery still fails, the window remains failed
+and rerunning the same command retries it while reusing completed windows. This recovery
+does not change the initial prompt or invalidate existing successful analyses.
+
 Check that the log reports GPU offload rather than CPU-only execution. Record runtime version,
 model revision, settings, actual peak VRAM and elapsed time locally. GPU performance and actual
 semantic accuracy were not measured while generating this repository.
