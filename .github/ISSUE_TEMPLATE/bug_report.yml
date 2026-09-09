@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible problem without uploading private media
+title: "[Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach original personal footage, songs, project databases, model weights or unsanitized logs.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, application version, FFmpeg and local model/runtime versions, if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Prefer the synthetic demo or media you have explicit permission to share.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

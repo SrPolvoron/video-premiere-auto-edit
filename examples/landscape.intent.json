@@ -1,0 +1,10 @@
+{
+  "min_shot": 2.5,
+  "max_shot": 5.0,
+  "max_pov_fraction": 0.2,
+  "preferred_tags": ["landscape", "mountain", "river", "paisaje", "montana", "rio"],
+  "avoid_tags": ["traffic", "trafico"],
+  "start_stage": "establishing",
+  "end_stage": "closing",
+  "order": "variety"
+}

@@ -1,0 +1,13 @@
+# Copy to model.local.toml IN THE REPOSITORY ROOT before editing.
+# Paths are relative to the TOML file, not to your current shell directory.
+# Binary and weights must already exist. No automatic downloads occur.
+[runtime]
+server = "tools/llama.cpp/llama-server.exe"
+model = "models/Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+mmproj = "models/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf"
+model_revision = "qwen3-vl-4b-instruct-q4-k-m-local-trial-1"
+context = 8192
+gpu_layers = 99
+max_tokens = 1536
+startup_timeout = 180
+request_timeout = 180
