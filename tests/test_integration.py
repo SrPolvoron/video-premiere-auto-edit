@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import json
 import shutil
 import xml.etree.ElementTree as ET
 
 import pytest
 
 from autoeditor_local.analysis import AnalysisSettings, analyze
+from autoeditor_local.audio import music_info
 from autoeditor_local.cli import main
 from autoeditor_local.demo import demo
+from autoeditor_local.export import export_plan
 from autoeditor_local.media import ingest, probe, require_binary, run_media
+from autoeditor_local.planner import create_plan
 from autoeditor_local.project import Project, init_project
-from autoeditor_local.util import AutoEditorError
+from autoeditor_local.util import AutoEditorError, file_hash
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg is not installed")]
@@ -123,3 +127,70 @@ def test_single_command_cpu_run(real_project, capsys):
     code = main(["run", str(real_project.root), "--backend", "technical", "--duration", "4", "--fps", "30"])
     assert code == 0
     assert (real_project.root / "exports" / "cut-0001.xml").exists()
+
+
+def test_auto_conform_is_cached_and_preserves_original(real_project):
+    analyze(real_project, AnalysisSettings(window=4, stride=3))
+    media = real_project.media()[0]
+    metadata = media["metadata"]
+    metadata.update(
+        fps="742343/24665", nominal_fps="30", vfr_suspected=True,
+        timing_check="forced-vfr-integration-fixture",
+    )
+    with real_project.db:
+        real_project.db.execute(
+            "UPDATE media SET metadata=? WHERE id=?", (json.dumps(metadata), media["id"]),
+        )
+    plan = create_plan(real_project, duration=4)
+    original = real_project.media_root / media["relative_path"]
+    original_hash = file_hash(original)
+
+    xml, first_report_path = export_plan(real_project, plan)
+    first = json.loads(first_report_path.read_text(encoding="utf-8"))
+    first_resolution = next(iter(first["export_validation"]["timing_resolutions"].values()))
+    assert first_resolution["method"] == "auto-conform"
+    assert first_resolution["conform_cache_hit"] is False
+    path_url = ET.parse(xml).findtext(".//file/pathurl")
+    assert "/cache/conform/" in path_url.replace("%5C", "/").replace("\\", "/")
+
+    _, second_report_path = export_plan(real_project, plan, timing="auto", overwrite=True)
+    second = json.loads(second_report_path.read_text(encoding="utf-8"))
+    second_resolution = next(iter(second["export_validation"]["timing_resolutions"].values()))
+    assert second_resolution["conform_cache_hit"] is True
+    assert file_hash(original) == original_hash
+    assert list((real_project.root / "cache" / "conform").glob("*.mov"))
+
+
+def test_real_multistream_source_muted_keeps_music(tmp_path):
+    media_root = tmp_path / "multistream-media"
+    media_root.mkdir()
+    source = media_root / "two-audio-streams.mp4"
+    song = tmp_path / "music.wav"
+    run_media([
+        require_binary("ffmpeg"), "-nostdin", "-v", "error", "-n",
+        "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=6",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=6",
+        "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=6",
+        "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(source),
+    ])
+    run_media([
+        require_binary("ffmpeg"), "-nostdin", "-v", "error", "-n",
+        "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=8",
+        "-c:a", "pcm_s16le", str(song),
+    ])
+    project_root = tmp_path / "multistream-project"
+    init_project(project_root, media_root)
+    with Project(project_root) as project:
+        ingest(project)
+        assert project.media()[0]["metadata"]["audio_streams"] == 2
+        analyze(project, AnalysisSettings(window=3, stride=3))
+        music = music_info(project, song, duration=4, sync=False)
+        plan = create_plan(
+            project, duration=4, music=music, include_original_audio=False,
+        )
+        xml, _ = export_plan(project, plan, timing="auto")
+        ids = [item.attrib["id"] for item in ET.parse(xml).findall(".//clipitem")]
+        assert not any(clip_id.startswith("a-") for clip_id in ids)
+        assert any(clip_id.startswith("music-") for clip_id in ids)

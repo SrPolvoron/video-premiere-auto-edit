@@ -1,0 +1,25 @@
+{
+  "preferred_tags": [
+    "dance",
+    "dancing",
+    "full body",
+    "full-body",
+    "movement",
+    "choreography",
+    "steps",
+    "turn",
+    "arms",
+    "energetic"
+  ],
+  "avoid_tags": [
+    "face",
+    "close-up",
+    "close up",
+    "portrait",
+    "head",
+    "selfie",
+    "static",
+    "idle"
+  ],
+  "order": "variety"
+}

@@ -1,47 +1,62 @@
 # Roadmap
 
-## Delivered alpha
+## Alpha entregada
 
-Local CLI; safe media inventory; per-project SQLite; technical and local-model adapters;
-resumable windows; multiple proposed actions per window; persistent feedback; immutable plans;
-soft presets; validated prompt-to-policy conversion; optional beat tracking; xmeml serialization;
-synthetic demo; automated unit/integration tests; public-repository hygiene; CI configuration.
+CLI local; inventario seguro de media; SQLite por proyecto; adaptadores técnico y de modelo local;
+ventanas reanudables; varias acciones propuestas por ventana; feedback persistente; planes
+inmutables; presets; conversión validada de prompt a política; beats opcionales; serialización
+xmeml; demo sintética; pruebas unitarias/integración; higiene del repositorio y CI.
 
-## Gate 1: validate the actual workstation
+Planner V2 incorpora perfiles de prioridad declarativos, composición explícita de políticas, ritmo
+y duración variables, diversidad global, límites de repetición por medio y presupuesto de primeros
+planos.
 
-Run the technical demo on Windows, import its XML in Premiere, and record the result.
-Load the chosen Qwen/llama.cpp combination on the RTX 4060 and record memory, offload and throughput.
-Manually label a small set of original preparation, riding and nature clips to measure actual
-recognition and boundary errors. A unit-test double is never evidence of semantic quality.
+La timeline interna es la representación canónica. Timing V2 incorpora modos automático,
+estricto, interpretado y conformado, inspección CFR/VFR, cache no destructiva y preservación de
+material high-FPS. XMEML continúa como adaptador limitado.
 
-Success requires reproducible results, not just an attractive demonstration montage.
+La arquitectura común de decisiones también está entregada: IDs de clip persistentes, modos
+off/auto/manual/hybrid, overrides, locks por propiedad, procedencia auditable y migración SQLite
+V1→V2. Microcuts, retiming/slow motion, transiciones y efectos declarativos ya son consumidores.
+Siguen pendientes speed ramps, interpolación, estabilización, denoise, mejora nocturna, color e
+integración avanzada de Premiere.
 
-## Gate 2: make rough cuts reliably editable
+## Gate 1: validar el equipo real
 
-Validate mixed FPS, phone VFR, rotation, media relinking, original audio and long source offsets.
-Consider an OTIO adapter after verifying the precise legacy format and adapter distribution;
-OTIO by itself is not a guarantee of Premiere interoperability.
+Ejecutar la demo técnica en Windows, importar su XML en Premiere y registrar el resultado. Cargar
+la combinación elegida de Qwen/llama.cpp en la RTX 4060 y medir memoria, offload y rendimiento.
+Etiquetar manualmente un conjunto pequeño de vídeos reales de preparación, conducción y naturaleza
+para medir errores de reconocimiento y límites. Un test double nunca demuestra calidad semántica.
 
-Add human-labeled boundary regression fixtures, then refine coarse candidates with denser local
-sampling around likely action transitions. Track dropped actions, false highlights, unnecessary
-cuts and time spent correcting the proposed timeline.
+El gate exige resultados reproducibles, no solo un montaje atractivo.
 
-## Gate 3: better editorial decisions
+## Gate 2: cortes realmente editables
 
-Add true visual embeddings and diversity selection, richer conditional story graphs, coherent
-repeated scene groups, explicit include/exclude constraints and candidate alternatives.
-Make required closing/opening shots distinct from soft preferences. Add stable seeding for
-alternative deterministic proposals and more precise why-selected/why-rejected reports.
+Validar en Premiere el flujo implementado de FPS mixtos/conform con teléfonos VFR reales,
+rotación, relink, audio original y offsets largos. Añadir regresiones por formato cuando proceda.
+Considerar un adaptador OTIO después de verificar el formato heredado y la distribución del
+adaptador; OTIO no garantiza por sí solo interoperabilidad con Premiere.
 
-## Gate 4: music and feedback
+Añadir fixtures de límites etiquetados por personas y refinar candidatos gruesos con muestreo
+local más denso cerca de transiciones. Medir acciones perdidas, falsos highlights, cortes
+innecesarios y tiempo de corrección de la timeline propuesta.
 
-Add evaluated downbeat/section estimators separately from basic beat tracking. Align visual
-anchors to selected musical accents without cutting gestures unintentionally. Import explicit
-Premiere-exported edit decisions and compare them to stored plan IDs. Learning from feedback
-must be an implemented, measurable policy update, not a claim that SQLite trains a model.
+## Gate 3: mejores decisiones editoriales
 
-## Gate 5: product experience
+Añadir embeddings visuales reales, grafos narrativos condicionales más ricos, grupos coherentes de
+escenas repetidas, inclusiones/exclusiones explícitas y alternativas. Separar planos inicial/final
+obligatorios de preferencias suaves. Incorporar semillas estables para propuestas deterministas
+alternativas e informes de selección/rechazo más precisos.
 
-Only after import and local inference gates pass: a small local UI, a Windows package built/tested
-on Windows, dependency/model installation with pinned checksums, and reproducible releases.
-No need for Docker, an account system, a hosted service or another full video editor.
+## Gate 4: música y feedback
+
+Añadir estimadores evaluados de downbeats/secciones separados del tracking básico de beats. Alinear
+anclas visuales con acentos sin cortar gestos. Importar decisiones de edición exportadas desde
+Premiere y compararlas con IDs de plan. Aprender del feedback exige una actualización de política
+implementada y medible; guardar datos en SQLite no entrena un modelo.
+
+## Gate 5: experiencia de producto
+
+Solo tras superar los gates de importación e inferencia local: UI local pequeña, paquete Windows
+construido/probado en Windows, instalación de dependencias/modelos con checksums fijados y releases
+reproducibles. No hacen falta Docker, cuentas, servicio alojado ni otro editor completo.

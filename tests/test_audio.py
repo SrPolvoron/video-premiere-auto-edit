@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import wave
 import xml.etree.ElementTree as ET
@@ -44,6 +45,28 @@ def test_optional_music_without_beat_analysis(catalog_project, clicks):
     assert music_clip.findtext("in") == "30"
     assert music_clip.findtext("out") == "210"
     assert not any(c.attrib["id"].startswith("a-") for c in root.findall(".//clipitem"))
+
+
+def test_multistream_source_muted_exports_without_source_audio_and_keeps_music(
+    catalog_project, clicks,
+):
+    music = music_info(catalog_project, clicks, 6, offset=0, sync=False)
+    plan = create_plan(
+        catalog_project, duration=6, music=music, include_original_audio=False,
+    )
+    for clip in plan["timeline"]["video_tracks"][0]["clips"]:
+        clip["metadata"]["audio_streams"] = 3
+        clip["metadata"]["audio_channels"] = 6
+        clip["metadata"]["audio_start"] = 1.5
+        clip["audio"]["enabled"] = False
+    xml, report_path = export_plan(catalog_project, plan, timing="auto")
+    root = ET.parse(xml).getroot()
+    ids = [clip.attrib["id"] for clip in root.findall(".//clipitem")]
+    assert not any(clip_id.startswith("a-") for clip_id in ids)
+    assert any(clip_id.startswith("music-") for clip_id in ids)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["timeline"]["audio"]["original_enabled"] is False
+    assert report["timeline"]["music_tracks"][0]["clips"]
 
 
 def test_real_beat_detection_on_synthetic_clicks(catalog_project, clicks):

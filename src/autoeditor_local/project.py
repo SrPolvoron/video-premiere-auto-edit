@@ -10,8 +10,8 @@ from typing import Any
 
 from .util import AutoEditorError, file_hash, now, read_json, write_json
 
-SCHEMA_VERSION = 1
-SCHEMA = """
+SCHEMA_VERSION = 2
+SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS media (
     id INTEGER PRIMARY KEY,
     relative_path TEXT NOT NULL UNIQUE,
@@ -73,6 +73,62 @@ CREATE TABLE IF NOT EXISTS plans (
 );
 """
 
+MIGRATION_2 = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS clip_identities (
+    identity_key TEXT PRIMARY KEY,
+    clip_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS editorial_decisions (
+    id INTEGER PRIMARY KEY,
+    decision_id TEXT NOT NULL UNIQUE,
+    feature TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK(target_kind IN ('feature','clip','range')),
+    target_id TEXT,
+    target_range TEXT,
+    provenance TEXT NOT NULL CHECK(provenance IN ('automatic','manual','accepted','rejected','modified')),
+    properties TEXT NOT NULL,
+    locks TEXT NOT NULL,
+    unlocks TEXT NOT NULL,
+    supersedes TEXT REFERENCES editorial_decisions(decision_id),
+    automatic_key TEXT UNIQUE,
+    created_at TEXT NOT NULL,
+    CHECK((target_kind='feature' AND target_id IS NULL AND target_range IS NULL)
+       OR (target_kind='clip' AND target_id IS NOT NULL AND target_range IS NULL)
+       OR (target_kind='range' AND target_id IS NOT NULL AND target_range IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS editorial_decisions_one_outcome
+ON editorial_decisions(supersedes) WHERE supersedes IS NOT NULL;
+CREATE INDEX IF NOT EXISTS editorial_decisions_target
+ON editorial_decisions(feature,target_kind,target_id,id);
+"""
+
+REQUIRED_SCHEMA = {
+    "media": {"id", "relative_path", "fingerprint", "metadata"},
+    "analyses": {"key", "media_id", "status"},
+    "segments": {"id", "analysis_key", "media_id", "start", "end"},
+    "feedback": {"id", "segment_id", "decision"},
+    "plans": {"id", "created_at", "payload"},
+    "clip_identities": {"identity_key", "clip_id", "created_at"},
+    "editorial_decisions": {
+        "id", "decision_id", "feature", "target_kind", "target_id", "target_range",
+        "provenance", "properties", "locks", "unlocks", "supersedes", "automatic_key",
+        "created_at",
+    },
+}
+
+
+def _validate_schema(database: sqlite3.Connection) -> None:
+    for table, required in REQUIRED_SCHEMA.items():
+        columns = {
+            row[1] for row in database.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if not required <= columns:
+            raise AutoEditorError(
+                f"La migracion SQLite no produjo el schema esperado para {table}."
+            )
+
 
 def init_project(root: Path, media_root: Path, name: str | None = None) -> Path:
     root, media_root = root.resolve(), media_root.resolve()
@@ -107,7 +163,9 @@ class Project(AbstractContextManager):
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.config = read_json(self.root / "project.json")
-        if self.config.get("schema_version") != SCHEMA_VERSION:
+        config_version = self.config.get("schema_version")
+        if (not isinstance(config_version, int) or isinstance(config_version, bool)
+                or not 1 <= config_version <= SCHEMA_VERSION):
             raise AutoEditorError("Unsupported project version. Do not overwrite this database.")
         self.db = sqlite3.connect(self.root / "project.db", timeout=10)
         self.db.row_factory = sqlite3.Row
@@ -115,12 +173,29 @@ class Project(AbstractContextManager):
         # One writer and local/external disks: DELETE avoids persistent WAL sidecars.
         self.db.execute("PRAGMA journal_mode = DELETE")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, SCHEMA_VERSION):
+        if not 0 <= version <= SCHEMA_VERSION:
             self.db.close()
             raise AutoEditorError("Database schema is newer than this application.")
-        self.db.executescript(SCHEMA)
-        self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        self.db.commit()
+        try:
+            if version == 0:
+                self.db.executescript(SCHEMA_V1)
+                self.db.execute("PRAGMA user_version = 1")
+                self.db.commit()
+                version = 1
+            if version == 1:
+                self.db.executescript(MIGRATION_2)
+                _validate_schema(self.db)
+                self.db.execute("PRAGMA user_version = 2")
+                self.db.commit()
+                version = 2
+            _validate_schema(self.db)
+            if config_version != version:
+                self.config["schema_version"] = version
+                write_json(self.root / "project.json", self.config)
+        except (sqlite3.Error, OSError, AutoEditorError):
+            self.db.rollback()
+            self.db.close()
+            raise
 
     @property
     def media_root(self) -> Path:
@@ -198,4 +273,7 @@ class Project(AbstractContextManager):
             "complete_segments": len(self.segments()),
             "analyses": self.rows("SELECT status,COUNT(*) AS count FROM analyses GROUP BY status"),
             "plans": self.rows("SELECT id,created_at FROM plans ORDER BY created_at"),
+            "editorial_decisions": self.db.execute(
+                "SELECT COUNT(*) FROM editorial_decisions"
+            ).fetchone()[0],
         }

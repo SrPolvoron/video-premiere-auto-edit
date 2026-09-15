@@ -16,13 +16,16 @@ from pathlib import Path
 from . import __version__
 from .analysis import AnalysisSettings, analyze
 from .audio import music_info
+from .decisions import list_decisions, record_decisions, resolve_decisions
 from .demo import demo
 from .export import export_plan
 from .media import ingest
 from .planner import PRESETS, create_plan, load_plan
+from .profiles import priority_profile_names
 from .project import Project, init_project
+from .timing import TIMING_MODES
 from .util import AutoEditorError, project_lock, read_json, write_json
-from .vision import LocalModel, load_runtime, validate_intent
+from .vision import LocalModel, load_runtime
 
 
 def _analysis_options(parser):
@@ -43,13 +46,24 @@ def _analysis_options(parser):
 def _plan_options(parser, add_runtime=True):
     parser.add_argument("--duration", type=float, default=30)
     parser.add_argument("--preset", choices=list(PRESETS), default="balanced")
+    parser.add_argument("--priority", choices=priority_profile_names(), default="balanced",
+                        help="perfil editorial declarativo")
+    parser.add_argument("--pace", choices=["calm", "balanced", "dynamic"],
+                        help="ritmo explícito; prevalece sobre preset, perfil, intent y prompt")
+    parser.add_argument("--max-clips-per-media", type=int,
+                        help="límite por original, con fallback explícito si faltan alternativas")
+    parser.add_argument("--max-close-fraction", type=float,
+                        help="fracción máxima de la timeline ocupada por primeros planos")
+    parser.add_argument("--preferred-shot", action="append", choices=["wide", "medium", "close", "detail", "pov", "unknown"])
+    parser.add_argument("--avoid-shot", action="append", choices=["wide", "medium", "close", "detail", "pov", "unknown"])
     parser.add_argument("--fps", default="30", help="e.g. 24, 25, 30, or 30000/1001")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     prompt = parser.add_mutually_exclusive_group()
     prompt.add_argument("--prompt", default="")
     prompt.add_argument("--prompt-file", type=Path)
-    parser.add_argument("--intent-file", type=Path, help="validated structured intent; overrides prompt fields")
+    parser.add_argument("--intent-file", type=Path,
+                        help="política de usuario; se combina sin borrar listas del preset/perfil")
     if add_runtime:
         parser.add_argument("--runtime", type=Path)
     parser.add_argument("--music", type=Path)
@@ -60,9 +74,16 @@ def _plan_options(parser, add_runtime=True):
 
 def _export_options(parser):
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--timing", choices=sorted(TIMING_MODES), default="auto",
+        help="politica de tiempo/FPS: auto (por defecto), strict, interpret o conform",
+    )
     parser.add_argument("--allow-unverified-timing", action="store_true",
-                        help="EXPERIMENTAL: export mixed FPS/VFR for a manual Premiere import test")
-    parser.add_argument("--source-fps", help="EXPERIMENTAL: interpret all source timings at this FPS in XML only; requires --allow-unverified-timing")
+                        help="compatibilidad obsoleta: equivale a --timing interpret")
+    parser.add_argument(
+        "--source-fps",
+        help="interpretar los tiempos de origen a este FPS; requiere --timing interpret",
+    )
     parser.add_argument("--overwrite", action="store_true", help="overwrite an existing generated XML/JSON export")
     parser.add_argument("--verify-media", action="store_true", help="rehash all originals before export")
 
@@ -108,6 +129,11 @@ def parser() -> argparse.ArgumentParser:
     feedback.add_argument("segment_id")
     feedback.add_argument("decision", choices=["prefer", "reject", "neutral"])
     feedback.add_argument("--note", default="")
+    decisions = commands.add_parser(
+        "decisions", help="listar o aplicar decisiones editoriales persistentes",
+    )
+    decisions.add_argument("project", type=Path)
+    decisions.add_argument("--apply", type=Path, help="JSON declarativo con una decision o lista")
     relink = commands.add_parser("relink", help="change the media root after moving an external drive")
     relink.add_argument("project", type=Path)
     relink.add_argument("--media-root", required=True, type=Path)
@@ -160,19 +186,32 @@ def _prompt(args) -> str:
 
 def _plan(args, project: Project, model) -> dict:
     prompt = _prompt(args)
-    intent = model.intent(prompt) if prompt and model else {}
+    prompt_intent = model.intent(prompt) if prompt and model else {}
     if prompt and not model:
         raise AutoEditorError("A natural-language prompt requires a local model; use --intent-file for a no-model policy.")
-    if args.intent_file:
-        intent.update(validate_intent(read_json(args.intent_file)))
+    user_intent = read_json(args.intent_file) if args.intent_file else {}
+    cli_overrides = {
+        key: value for key, value in {
+            "pace": args.pace,
+            "max_clips_per_media": args.max_clips_per_media,
+            "max_close_fraction": args.max_close_fraction,
+            "preferred_shots": args.preferred_shot,
+            "avoid_shots": args.avoid_shot,
+        }.items() if value is not None
+    }
     music = music_info(project, args.music, args.duration, args.music_offset, not args.no_beat_sync) if args.music else None
-    return create_plan(project, args.duration, args.preset, args.fps, args.width, args.height,
-                       intent, prompt, music, not args.mute_original)
+    return create_plan(
+        project, duration=args.duration, preset=args.preset, fps=args.fps,
+        width=args.width, height=args.height, intent=user_intent, prompt=prompt,
+        music=music, include_original_audio=not args.mute_original,
+        priority=args.priority, prompt_intent=prompt_intent, cli_overrides=cli_overrides,
+    )
 
 
 def _export(args, project, plan):
     xml, report = export_plan(project, plan, args.output, args.allow_unverified_timing,
-                              args.overwrite, args.verify_media, source_fps_override=args.source_fps)
+                              args.overwrite, args.verify_media,
+                              source_fps_override=args.source_fps, timing=args.timing)
     timing_warnings = read_json(report)["export_validation"]["timing_warnings"]
     return {"xml": str(xml), "report": str(report), "plan": plan["id"],
             "warnings": list(dict.fromkeys(plan["warnings"] + timing_warnings))}
@@ -226,6 +265,24 @@ def dispatch(args):
             if args.command == "feedback":
                 project.feedback(args.segment_id, args.decision, args.note)
                 return {"segment": args.segment_id, "decision": args.decision}
+            if args.command == "decisions":
+                applied = []
+                if args.apply:
+                    document = read_json(args.apply)
+                    if isinstance(document, dict) and set(document) == {"decisions"}:
+                        payloads = document["decisions"]
+                    elif isinstance(document, dict):
+                        payloads = [document]
+                    else:
+                        payloads = document
+                    applied = [
+                        decision["decision_id"]
+                        for decision in record_decisions(project, payloads)
+                    ]
+                return {
+                    "applied": applied, "decisions": list_decisions(project),
+                    "effective": resolve_decisions(project),
+                }
             if args.command == "relink":
                 project.relink(args.media_root)
                 return {"media_root": str(project.media_root)}

@@ -1,0 +1,34 @@
+{
+  "preferred_tags": [
+    "dance",
+    "dancing",
+    "body movement",
+    "full body",
+    "medium shot",
+    "close-up",
+    "face",
+    "eye contact",
+    "looking at camera",
+    "expression",
+    "facial expression",
+    "pose",
+    "posing",
+    "gesture",
+    "turn",
+    "hair movement",
+    "slow movement",
+    "confident",
+    "sensual",
+    "elegant"
+  ],
+  "avoid_tags": [
+    "idle",
+    "accidental",
+    "obstructed",
+    "out of frame",
+    "blurry",
+    "poor framing",
+    "empty scene"
+  ],
+  "order": "variety"
+}

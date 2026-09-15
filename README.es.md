@@ -83,15 +83,50 @@ Esto consulta el mismo SQLite, sin volver a analizar los vídeos. Cada montaje s
 como `cut-0001`, `cut-0002`, etc. También puedes rechazar o priorizar candidatos con `feedback`;
 no se entrenan pesos del modelo y no se leen automáticamente cambios hechos en Premiere.
 
+## Planner V2 y perfiles de prioridad
+
+El planner admite duraciones variables por clip y los ritmos `calm`, `balanced` y `dynamic`.
+Los perfiles incorporados son `balanced`, `dance`, `sensual`, `moto`, `training`,
+`martial-arts`, `nature` y `action`:
+
+```powershell
+.\.venv\Scripts\autoeditor.exe plan .\work\ruta `
+  --priority dance --pace dynamic --duration 30 --fps 30
+```
+
+`--max-clips-per-media` limita la repetición de un mismo original y solo se relaja, con un aviso
+explícito, cuando no queda ninguna alternativa válida. `--max-close-fraction`,
+`--preferred-shot` y `--avoid-shot` controlan la distribución de planos. Las preferencias del
+preset, perfil, archivo de intent, prompt y CLI se combinan sin que las etiquetas del prompt
+borren las anteriores. Consulta [Planner V2 y perfiles](docs/planner-v2.md).
+
 Para analizar música instala el extra con `pip install -e ".[audio]"` y usa `--music`.
 Sin música se puede conservar el sonido ambiente. La mezcla final se hace en Premiere.
+
+## Decisiones editoriales persistentes
+
+La timeline usa IDs estables como `clip-001`, independientes de la posición en XMEML. Una capa
+común guarda modos `off|auto|manual|hybrid`, overrides, locks por propiedad y procedencia
+`automatic|manual|accepted|rejected|modified`. Las decisiones viven en SQLite y los planes nuevos
+incluyen su vista efectiva sin destruir decisiones bloqueadas. Consulta
+[Decisiones editoriales persistentes](docs/decisiones-editoriales.md).
+
+Los [microcuts/jump cuts](docs/microcuts.md), el
+[retiming, slow motion, transiciones y efectos](docs/retiming-transiciones-efectos.md) ya usan ese
+contrato. Conservan la duración objetivo, la música y los originales. Estabilización, denoise,
+mejora nocturna y color siguen sin implementarse.
 
 ## Importante sobre el XML
 
 La estructura se valida automáticamente, pero la importación real debe probarse en Premiere.
-La versión inicial bloquea la exportación normal si detecta FPS distintos, posible VFR o ciertos
-desfases de audio. `--allow-unverified-timing` permite generar un XML para una **prueba controlada**;
-no corrige esos problemas. Consulta [la lista de comprobaciones](docs/premiere.md).
+`--timing auto`, activo por defecto, comprueba CFR/VFR y crea una copia CFR cacheada solo cuando
+hace falta. No modifica los originales y conserva las tasas 50/60/100/120/240 fps para que sus
+frames sigan disponibles en un futuro flujo de slow motion. Para diagnóstico también existen
+`strict`, `interpret` y `conform`. Consulta [Timing, FPS y conformado](docs/timing.md) y
+[la lista de comprobaciones de Premiere](docs/premiere.md).
+
+`--mute-original` elimina de la salida el audio de las fuentes, incluso con varios streams, sin
+afectar a una pista de música opcional.
 
 El modo vertical ajusta el encuadre con bandas cuando corresponde. No sigue sujetos ni recorta
 inteligentemente. Tampoco aplica color, LUT, estabilización o reducción de ruido.

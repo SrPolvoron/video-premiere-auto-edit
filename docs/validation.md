@@ -1,61 +1,112 @@
-# Validation record - 0.1.0a1
+# Registro de validación — 0.1.0a1 sin publicar
 
-Validation performed while producing this source release. This file separates executed checks
-from configured or planned checks; it is not a hardware or editor compatibility certification.
+Validación ejecutada el 15 de septiembre de 2026. Este documento separa comprobaciones reales de
+tareas pendientes; no certifica hardware, calidad semántica ni compatibilidad con Premiere.
 
-## Executed successfully
+## Resultado automatizado
 
-- **98 automated tests passed**, with zero test failures and no pytest warnings in the final run.
-- Statement coverage: **86.57%** (1199 of 1385 statements).
-- Real FFmpeg synthetic demo: three generated sources, ten analyzed windows, an 8-second/24-fps
-  rough cut, legacy XML plus JSON export, and source audio linkage.
-- Real beat detection on a generated 120-BPM click track; approximate tempo/timestamps checked.
-- Real FFprobe ingestion, changed/missing media handling, source hash checks and cache reuse.
-- Analysis pause/resume and failure/retry through an explicitly labeled test model.
-- Local HTTP adapter contract: timestamped inline images, JSON response validation, rejected redirects,
-  rejected truncated output, and prompt policy validation. This server is a test double, not Qwen.
-- Timeline continuity, source bounds, reject/prefer feedback, immutable plan versions, conservative
-  mixed-FPS/VFR gates, XML links/markers/URLs, and original-media preservation.
-- Python 3.11 syntax compatibility parsed using the running interpreter's compatibility mode.
-- Python wheel build from the actual source using setuptools/pip without downloading build dependencies.
-- Built wheel installed into an isolated target directory; its `doctor` command executed successfully.
-- Public-source guard checked 45 tracked files with no issues; staged whitespace checks passed.
+- Suite completa en Windows con Python 3.13.15: **201 tests superados**, sin warnings incluso
+  tratando `ResourceWarning` como error.
+- Cobertura total de statements: **87 %**.
+- Ruff superado sobre `src`, `tests` y `scripts`.
+- `scripts/check_public_tree.py`, construcción de sdist/wheel y `git diff --check` superados.
+- Compatibilidad sintáctica comprobada por CI/configuración para Python 3.11; la ejecución local
+  de este registro corresponde a Python 3.13.
 
-A test exposed independent endpoint rounding that could add a source frame. The serializer now
-rounds source duration once, and the planner snaps source starts to the source frame grid. A regression
-test checks that same-rate source and sequence clip durations remain equal.
+## Planner V2 y perfiles
 
-## Development environment
+- Duración variable, aceptación de candidatos cortos y rebalanceo exacto sin residual artificial.
+- Ritmos calm/balanced/dynamic, diversidad global, límite/fallback por medio y presupuesto de
+  primeros planos.
+- Perfiles balanced, dance, sensual, moto, training, martial-arts, nature y action.
+- Composición determinista de defaults, preset, prioridad, usuario, prompt y CLI.
 
-- OS: Linux
-- Python: 3.13.5
-- ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers
-- NumPy 2.3.5; Pillow 12.3.0; librosa 0.11.0; pytest 9.0.2.
-- No NVIDIA device/runtime available for a real GPU inference trial.
-- No Premiere application available in this environment.
+## Timeline y timing V2
 
-## Not executed or not established
+- Timeline canónica validada con IDs únicos, rangos racionales de origen, frames de secuencia,
+  audio, música y campos progresivos de retiming/transiciones/efectos/mejoras/color.
+- Adaptación y exportación de un snapshot V1 guardado sin timeline interna.
+- Modos auto, strict, interpret y conform, incluidos FPS racionales no representables y fuentes
+  high-FPS 60/120.
+- Conformado CFR real con FFmpeg sobre media sintética, reutilización de cache y hash del original
+  inalterado.
+- Fuente real con dos streams de audio + original silenciado: exportación válida, sin source audio
+  y con música preservada.
+- Rechazo explícito por XMEML de retiming/efectos no representables, sin perderlos en la
+  representación interna.
 
-- **Actual Qwen3-VL inference, GPU offload, peak VRAM, throughput or semantic accuracy on an RTX 4060.**
-- **Windows runtime execution and actual Premiere 26 XML import.**
-- End-to-end real motorcycle/nature footage quality or equality with any commercial auto-editor.
-- Fully precise action boundaries, musical downbeats/drops, auto-denoising, grading or learned taste.
-- Hosted GitHub Actions runs: the workflow is included but no remote repository was created/pushed.
-- Ruff execution in this environment: Ruff is configured for CI/development; it was not installed here.
-  Python syntax and import-use checks were performed separately and are not called a Ruff result.
-- Full reproducible dependency locking, independent security audit, GPU benchmark or a Windows installer.
+## Sistema común de decisiones
 
-## Reproduce
+- Modos `off`, `auto`, `manual` y `hybrid`, con resolución determinista y procedencia
+  `automatic`, `manual`, `accepted`, `rejected` y `modified`.
+- IDs `clip-NNN` persistentes entre regeneraciones; los targets ausentes se conservan como no
+  resueltos en vez de reasignarse por posición.
+- Overrides y locks por propiedad, incluido desbloqueo explícito y conservación al regenerar.
+- Propuestas automáticas idempotentes, respuestas hybrid únicas y escritura de lotes atómica.
+- Persistencia tras reabrir el proyecto y migración aditiva V1 → V2, incluyendo prueba de rollback
+  ante un schema V1 dañado y conservación de snapshots anteriores.
+- La timeline guarda la vista efectiva; microcuts, slow motion, transiciones y efectos usan el
+  mismo contrato. Estabilización, denoise, mejora nocturna y color siguen sin implementarse.
+
+## Microcuts / jump cuts
+
+- `off` no crea decisiones automáticas ni subclips; auto/manual/hybrid usan el mismo historial,
+  procedencia, locks y resolución que las demás features.
+- Niveles 1/2/3, colocación manual automática, rangos manuales racionales, aceptación, rechazo y
+  modificación hybrid cubiertos con tests deterministas.
+- Hijos con ID derivado estable, parent identity, rangos fuente válidos y no solapados, fragmentos
+  mínimos y duración total exacta de la timeline.
+- Beats sintéticos favorecen una posición cercana cuando cabe de forma segura; la música no cambia.
+- Serialización, persistencia SQLite, regeneración y adaptación de planes sin microcuts cubiertas.
+
+## Retiming, slow motion, transiciones y efectos
+
+- Retiming normal, constante y por regiones con fracciones exactas; duración solicitada y rangos
+  de música conservados.
+- Slow motion off/auto/manual/hybrid, niveles 1/2/3, targets por clip/rango/parent/child,
+  procedencia, locks, regeneración y seguridad para fuentes con FPS insuficiente.
+- Preferencia high-FPS y beats sintéticos probados sin atribuir interpolación ni calidad real.
+- Cut limpio, transición manual y automática escasa, aceptación hybrid y referencias entre clips
+  y timeline validadas.
+- Efectos declarativos off/auto/manual/hybrid, niveles y catálogo inicial validados.
+- Serialización, adaptación de planes anteriores y fallo explícito de XMEML ante una operación
+  compleja no representable.
+
+## Otras regresiones conservadas
+
+- Demo FFmpeg sintética completa, ingesta FFprobe y gestión de media cambiada/ausente.
+- Reanudación de análisis, recuperación de fallos y cache de previews.
+- Detección real de beats sobre clicks sintéticos.
+- Hashes de media, source bounds, redondeo de frames, enlaces de audio, marcadores y URLs XML.
+- Contrato del adaptador HTTP local: imágenes con timestamps, JSON estricto, redirects y respuestas
+  truncadas rechazados. El servidor de prueba no demuestra reconocimiento real.
+
+## Entorno local de esta ejecución
+
+- Windows, Python 3.13.15.
+- FFmpeg 8.1.2 full build.
+- NumPy 2.5.3, Pillow 12.3.0, pytest 9.1.1.
+- Sin ejecución de Premiere ni benchmark Qwen/CUDA/RTX 4060 en este registro.
+
+## No demostrado
+
+- Importación real en Premiere de CFR/VFR, FPS mixtos, rotación y offsets de distintas cámaras.
+- Inferencia Qwen3-VL, offload, pico de VRAM o rendimiento en RTX 4060.
+- Calidad sobre metraje real de moto/naturaleza ni equivalencia con editores comerciales.
+- Calidad visual real de slow motion/transiciones/efectos, límites de acción exactos,
+  downbeats/secciones musicales, denoise, grading, estabilización o interpolación.
+- Auditoría de seguridad independiente, instalador Windows o lock reproducible completo.
+
+## Reproducción
 
 ```bash
 python -m pip install -e ".[dev,audio]"
-python -m pytest -q --cov=autoeditor_local --cov-report=term-missing
+python -m pytest --cov=autoeditor_local --cov-report=term-missing
 python -m ruff check src tests scripts
 python scripts/check_public_tree.py
 python -m build
 ```
 
-Integration tests skip when FFmpeg/FFprobe are unavailable; the beat test also skips without librosa.
-Read the skipped count when comparing results. Test-double action labels are not recognition evidence.
-The public source archive deliberately excludes original/generated media, project SQLite files,
-model weights, runtime binaries, logs, environments and local build products.
+Las integraciones se omiten si faltan FFmpeg/FFprobe; la prueba de beats se omite sin librosa.
+Comprueba siempre el recuento de skips. El árbol público excluye media, SQLite de proyectos,
+exports, pesos, binarios, logs, entornos y caches locales.

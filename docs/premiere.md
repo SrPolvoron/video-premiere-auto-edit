@@ -1,98 +1,106 @@
-# Premiere XML export and acceptance checklist
+# Exportación XML y lista de aceptación en Premiere
 
-## Format choice
+## Formato
 
-V1 writes **legacy Final Cut Pro XML**, root `<xmeml version="5">`. This is not modern
-`.fcpxml` and not Premiere's native `.prproj` format. Adobe documents that modern FCP X XML
-cannot be imported directly without conversion. The relevant interchange model is documented
-in Apple's archived xmeml reference.
+AutoEditor escribe Final Cut Pro XML heredado, con raíz `<xmeml version="5">`. No es `.fcpxml`
+moderno ni el formato nativo `.prproj`. Adobe indica que el XML moderno de Final Cut Pro X no se
+importa directamente sin conversión. El modelo de intercambio empleado está descrito en la
+referencia archivada de Apple.
 
-- [Adobe: importing FCP XML](https://helpx.adobe.com/premiere/desktop/organize-media/import-files/migrate-from-final-cut-pro-x.html)
-- [Apple: xmeml elements and timing](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Elements/Elements.html)
+- [Adobe: importación de FCP XML](https://helpx.adobe.com/premiere/desktop/organize-media/import-files/migrate-from-final-cut-pro-x.html)
+- [Apple: elementos y timing de xmeml](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Elements/Elements.html)
 
-The serializer includes original file URLs, sequence and source frame rates, in/out points,
-video, original mono/stereo audio, optional mono/stereo music, linked components, descriptive
-clip names and sequence markers. Basic Motion scale is emitted to fit the source into the
-sequence; cropping and subject tracking are not implemented.
+El serializador incluye URLs de media, tasas de secuencia y origen, puntos in/out, vídeo, audio
+original mono/estéreo, música mono/estéreo opcional, componentes enlazados, nombres descriptivos y
+marcadores. Emite Basic Motion para encajar la fuente en la secuencia; no implementa recorte
+inteligente ni seguimiento de sujetos.
 
-## What was and was not tested
+XMEML es un adaptador de salida. La timeline interna de AutoEditor es la representación canónica.
 
-Automated tests check well-formed XML, file references, linked clip identifiers, integer timing,
-source bounds, quantization, immutable plans, and media preservation. **They do not execute
-Premiere or prove that its importer interprets every field as intended.**
+## Qué se ha probado
 
-The normal export path requires source and sequence FPS to match. Mixed FPS, suspected VFR,
-and significant source A/V offsets require `--allow-unverified-timing`. This flag only bypasses
-a conservative gate for experimentation; it does not fix VFR or certify synchronization.
-Surround/multiple audio streams are explicitly unsupported in this release.
+Las pruebas automatizadas comprueban XML bien formado, referencias, enlaces, timing entero,
+límites de origen, cuantización, snapshots inmutables y preservación de originales. También
+ejecutan conformado CFR real sobre media sintética y verifican su cache. No abren Premiere ni
+demuestran que su importador interprete cada campo como se espera.
 
-FFprobe metadata is only a VFR warning heuristic. A file can have variable timestamps even
-when its reported average and nominal rates agree. Smartphone footage must be checked in
-Premiere; automatic full timestamp scanning/conforming is a future task.
+El modo predeterminado `--timing auto` inspecciona CFR/VFR y crea una copia conformada cuando una
+fuente no es segura para el intercambio directo. Consulta [Timing, FPS y conformado](timing.md).
+El audio original multicanal o con varios streams sigue sin estar soportado por el adaptador; puede
+omitirse con `--mute-original` sin eliminar la música.
 
-## First import
+## Primera importación
 
-1. Run the synthetic demo, then import its `exports/cut-0001.xml` with **File > Import**.
-2. Confirm the sequence opens, media links resolve, the duration is 8 seconds at 24 fps,
-   there are three video edits, and linked source audio is present where expected.
-3. Check the first and last frame of each cut, audio alignment, letterboxing/scale and the
-   ability to extend a clip into unused original media.
-4. Save a native `.prproj`. The XML is an interchange artifact, not a replacement for a saved
-   Premiere project. Importing it normally also resolves referenced media; separately importing
-   all videos first is not required by this application.
+1. Ejecuta la demo sintética e importa `exports/cut-0001.xml` con **Archivo > Importar**.
+2. Confirma que la secuencia abre, los enlaces resuelven, la duración es de 8 segundos a 24 fps,
+   aparecen tres cortes de vídeo y el audio de fuente esperado está enlazado.
+3. Revisa el primer y último frame de cada corte, sincronía, escala/bandas y la posibilidad de
+   extender un clip dentro del material original disponible.
+4. Guarda un `.prproj`. El XML es un artefacto de intercambio, no sustituye al proyecto nativo.
 
-Then test a short real file from each camera separately at its actual frame rate. Only after
-those pass should mixed DJI/phone material be tested. Record exact Premiere, runtime and source
-format versions; mark compatibility as verified only for combinations actually exercised.
+Después prueba por separado un archivo real corto de cada cámara a su tasa original. Solo entonces
+combina DJI, teléfono y otras fuentes. Registra las versiones exactas de Premiere, sistema y formato;
+no marques una combinación como compatible si no se ha probado.
 
-## Real mixed-camera trial
+## Material mixto y VFR
 
-```powershell
-.\.venv\Scripts\autoeditor.exe export .\work\route --allow-unverified-timing
-```
-
-If a source average rate cannot be represented in xmeml (for example
-`742343/24665`), the plan is still saved. For a manual import trial, explicitly choose
-the rate at which **all source in/out times** should be represented:
+El flujo normal no requiere conocer CFR/VFR:
 
 ```powershell
-.\.venv\Scripts\autoeditor.exe export .\work\route --allow-unverified-timing --source-fps 30
+.\.venv\Scripts\autoeditor.exe export .\work\ruta
 ```
 
-This is an XML timing interpretation only. It does not transcode or conform VFR, change
-originals, modify the saved plan, or rerun analysis. The original measured/nominal rates
-and the chosen XML rates are recorded in `export_validation.source_rate_interpretations`.
-An explicit override always requires the experimental flag, even if it matches the sequence.
-Source video and linked source audio use the same interpreted rate; music keeps the
-sequence rate. Check cut boundaries, playback speed and audio synchronization in Premiere.
-If the trial drifts, conforming separate copies or timestamp-aware mapping remains necessary.
-
-Review all timing warnings in the companion JSON. If importing at a different drive letter:
+Para investigar una incompatibilidad sin crear derivados:
 
 ```powershell
-.\.venv\Scripts\autoeditor.exe relink .\work\route --media-root "F:\Videos\Route"
-.\.venv\Scripts\autoeditor.exe export .\work\route --overwrite --allow-unverified-timing
+.\.venv\Scripts\autoeditor.exe export .\work\ruta --timing strict
 ```
 
-`relink` hashes replacement originals to prevent linking a plan to unrelated same-named files.
-The new XML has current file URLs. Existing Premiere projects may also need their own media
-relink operation.
+`strict` informa de tasas no representables, material mixto, VFR o desfases A/V. Si se quiere una
+prueba manual de interpretación, sin corregir timestamps:
 
-## Color, exposure and audio
+```powershell
+.\.venv\Scripts\autoeditor.exe export .\work\ruta --timing interpret --source-fps 30
+```
 
-The exporter does not normalize HDR, D-Log M, HLG or different camera color profiles. The model
-sees small preview frames without a dedicated color-management pipeline, so technical judgments
-on log/HDR footage can be misleading. Review transformations and color space settings in Premiere.
+`interpret` solo cambia la tasa declarada en XML. Revisa velocidad, sincronía y puntos de corte. La
+opción heredada `--allow-unverified-timing --source-fps 30` se conserva para scripts existentes.
 
-Premiere's color controls are not a promise of advanced temporal video denoising. This project
-adds no denoiser and should not be advertised as rescuing low-light action-camera footage.
+Para forzar derivados CFR aunque la fuente parezca segura:
 
-Original audio and music remain separate and are not automatically mixed, faded or ducked.
-A loud music/source combination can clip until the mix is adjusted. No speed ramps, motion
-interpolation, stabilization, creative filters or transitions are baked into the rough cut.
+```powershell
+.\.venv\Scripts\autoeditor.exe export .\work\ruta --timing conform
+```
 
-## Future interoperability work
+El JSON complementario registra `timing_mode`, `timing_resolutions`, tasa medida/efectiva, decisión
+y acierto de cache. Si se ejecuta `clean-cache --yes`, hay que regenerar los XML que enlazaban media
+conformada.
 
-Validate real 24/25/30/50/60/120 and NTSC-rate samples in Premiere, implement a full timestamp
-check for VFR, test rotated phone videos, source timecodes and mixed-rate edge cases, then add
-safe optional conforming if necessary. Do not replace this gate with an untested compatibility claim.
+Si cambia la letra o ubicación de la unidad:
+
+```powershell
+.\.venv\Scripts\autoeditor.exe relink .\work\ruta --media-root "F:\Videos\Ruta"
+.\.venv\Scripts\autoeditor.exe export .\work\ruta --overwrite
+```
+
+`relink` compara hashes para no asociar un plan a archivos distintos con el mismo nombre. Un
+proyecto Premiere ya importado puede requerir además su propio relink.
+
+## Color, exposición y audio
+
+El exportador no normaliza HDR, D-Log M, HLG ni perfiles de color distintos. El modelo recibe
+previews pequeñas sin una canalización dedicada de color, por lo que sus métricas técnicas pueden
+ser engañosas en log/HDR. Revisa las transformaciones en Premiere.
+
+Los controles de color de Premiere no equivalen a reducción temporal avanzada de ruido. Este
+milestone no añade denoiser, estabilización, LUT, efectos, transiciones, rampas de velocidad ni
+interpolación de movimiento.
+
+Audio original y música permanecen en pistas separadas; no hay mezcla, fundidos ni ducking
+automáticos. Una combinación fuerte puede saturar hasta que se ajuste la mezcla.
+
+## Aceptación pendiente
+
+Falta validar en Premiere muestras reales 24/25/30/50/60/120 y NTSC, teléfonos VFR, rotación,
+timecode de origen, offsets largos y combinaciones mixtas. La suite sintética prueba la mecánica,
+pero no autoriza afirmar compatibilidad universal ni precisión de frame en el editor.

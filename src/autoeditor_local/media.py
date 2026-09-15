@@ -75,6 +75,7 @@ def probe(path: Path, require_video: bool = True) -> dict[str, Any]:
         "duration": duration,
         "fps": str(rate),
         "nominal_fps": nominal,
+        "time_base": stream.get("time_base", "unknown"),
         "width": int(stream.get("width", 0)),
         "height": int(stream.get("height", 0)),
         "rotation": rotation,
@@ -89,6 +90,7 @@ def probe(path: Path, require_video: bool = True) -> dict[str, Any]:
             or data.get("format", {}).get("tags", {}).get("creation_time"),
         "color_transfer": stream.get("color_transfer", "unknown"),
         "color_primaries": stream.get("color_primaries", "unknown"),
+        "color_space": stream.get("color_space", "unknown"),
         "vfr_suspected": suspect,
         "timing_check": "metadata_only_not_a_full_CFR_verification",
     }

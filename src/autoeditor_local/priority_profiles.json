@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "balanced": {
+      "pace": "balanced",
+      "max_clips_per_media": 3,
+      "max_close_fraction": 0.45,
+      "preferred_shots": ["wide", "medium"]
+    },
+    "dance": {
+      "pace": "dynamic",
+      "order": "variety",
+      "min_shot": 0.8,
+      "max_shot": 2.8,
+      "max_clips_per_media": 2,
+      "max_pov_fraction": 0.15,
+      "max_close_fraction": 0.3,
+      "preferred_shots": ["wide", "medium"],
+      "preferred_tags": [
+        "dance", "dancing", "baile", "choreography", "coreografia",
+        "body movement", "movimiento corporal", "full body", "plano completo",
+        "steps", "turn", "arms", "energetic"
+      ],
+      "avoid_tags": ["idle", "static", "accidental", "obstructed", "out of frame"]
+    },
+    "sensual": {
+      "pace": "balanced",
+      "order": "variety",
+      "min_shot": 1.2,
+      "max_shot": 3.8,
+      "max_clips_per_media": 2,
+      "max_pov_fraction": 0.2,
+      "max_close_fraction": 0.4,
+      "preferred_shots": ["medium", "wide", "close"],
+      "preferred_tags": [
+        "dance", "baile", "body movement", "movimiento corporal",
+        "pose", "posing", "poses", "gesture", "gesto", "gaze", "mirada",
+        "face", "rostro", "eye contact", "looking at camera",
+        "medium shot", "plano medio", "full body", "plano completo"
+      ],
+      "avoid_tags": ["idle", "accidental", "obstructed", "out of frame", "poor framing"]
+    },
+    "moto": {
+      "pace": "dynamic",
+      "order": "story",
+      "min_shot": 0.8,
+      "max_shot": 2.8,
+      "max_clips_per_media": 2,
+      "max_pov_fraction": 0.5,
+      "max_close_fraction": 0.35,
+      "start_stage": "preparation",
+      "end_stage": "closing",
+      "preferred_tags": ["motorcycle", "moto", "riding", "route", "landscape", "paisaje"]
+    },
+    "training": {
+      "pace": "balanced",
+      "order": "chronological",
+      "min_shot": 1.2,
+      "max_shot": 4.0,
+      "max_clips_per_media": 3,
+      "max_close_fraction": 0.35,
+      "preferred_shots": ["wide", "medium"],
+      "preferred_tags": ["training", "exercise", "technique", "movement", "entrenamiento", "tecnica"],
+      "avoid_tags": ["idle", "obstructed", "out of frame"]
+    },
+    "martial-arts": {
+      "pace": "dynamic",
+      "order": "variety",
+      "min_shot": 0.7,
+      "max_shot": 2.6,
+      "max_clips_per_media": 2,
+      "max_close_fraction": 0.25,
+      "preferred_shots": ["wide", "medium"],
+      "preferred_tags": [
+        "martial arts", "artes marciales", "combat", "sparring", "kata",
+        "technique", "footwork", "kick", "punch", "full body"
+      ],
+      "avoid_tags": ["idle", "obstructed", "out of frame"]
+    },
+    "nature": {
+      "pace": "calm",
+      "order": "variety",
+      "min_shot": 2.5,
+      "max_shot": 5.5,
+      "max_clips_per_media": 2,
+      "max_pov_fraction": 1.0,
+      "max_close_fraction": 0.3,
+      "preferred_shots": ["wide", "detail"],
+      "preferred_tags": ["landscape", "paisaje", "water", "agua", "forest", "bosque", "mountain", "montana"]
+    },
+    "action": {
+      "pace": "dynamic",
+      "order": "variety",
+      "min_shot": 0.6,
+      "max_shot": 2.4,
+      "max_clips_per_media": 2,
+      "max_pov_fraction": 0.5,
+      "max_close_fraction": 0.3,
+      "preferred_shots": ["wide", "medium", "pov"],
+      "preferred_tags": ["action", "movement", "motion", "speed", "impact", "reaction"]
+    }
+  }
+}

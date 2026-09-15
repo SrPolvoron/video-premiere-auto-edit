@@ -12,8 +12,11 @@ import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
 
-from .planner import validate_plan
 from .project import Project
+from .timeline import (
+    music_clips, rate_fraction, source_seconds, timeline_frames, timeline_from_plan, video_clips,
+)
+from .timing import resolve_timing, xmeml_rate_values, xmeml_representable
 from .util import AutoEditorError, atomic_text, file_hash, fps_fraction, local_media, seconds_to_frames, write_json
 
 
@@ -24,12 +27,7 @@ def _text(parent: ET.Element, tag: str, value) -> ET.Element:
 
 
 def xml_rate(rate: Fraction) -> tuple[int, bool]:
-    if rate.denominator == 1:
-        return rate.numerator, False
-    for timebase in (24, 30, 48, 60, 120, 240):
-        if rate == Fraction(timebase * 1000, 1001):
-            return timebase, True
-    raise AutoEditorError(f"Frame rate {rate} cannot be represented exactly in xmeml.")
+    return xmeml_rate_values(rate)
 
 
 def _rate(parent: ET.Element, fps: Fraction):
@@ -141,67 +139,98 @@ def _links(elements: list[tuple[ET.Element, str, int, int]]):
 
 def export_plan(project: Project, plan: dict, output: Path | None = None,
                 allow_unverified_timing: bool = False, overwrite: bool = False,
-                verify_media: bool = False, source_fps_override: str | None = None) -> tuple[Path, Path]:
-    validate_plan(plan)
-    sequence = plan["sequence"]
-    fps = fps_fraction(sequence["fps"])
+                verify_media: bool = False, source_fps_override: str | None = None,
+                timing: str | None = "auto") -> tuple[Path, Path]:
+    timeline = timeline_from_plan(plan)
+    sequence = timeline["sequence"]
+    fps = rate_fraction(sequence["fps"])
     xml_rate(fps)
-    override_rate = fps_fraction(source_fps_override) if source_fps_override is not None else None
-    if override_rate is not None:
-        if not allow_unverified_timing:
-            raise AutoEditorError("--source-fps requires --allow-unverified-timing for a manual Premiere import test.")
-        xml_rate(override_rate)
-    paths = {}
-    source_rates = {}
+    timing_mode = timing or "auto"
+    if allow_unverified_timing:
+        if timing_mode not in {"auto", "interpret"}:
+            raise AutoEditorError("--allow-unverified-timing no se combina con --timing strict/conform.")
+        timing_mode = "interpret"
+    if source_fps_override is not None:
+        if timing_mode != "interpret":
+            raise AutoEditorError("--source-fps solo se admite con --timing interpret.")
+        xml_rate(fps_fraction(source_fps_override))
+
+    clips = video_clips(timeline)
+    if any(clip.get("retiming", {}).get("mode") != "none" for clip in clips):
+        raise AutoEditorError("XMEML todavía no exporta retiming; la timeline interna sí lo preserva.")
+    if any(clip.get("effects") or clip.get("enhancements")
+           or any(value is not None for value in clip.get("transitions", {}).values()) for clip in clips):
+        raise AutoEditorError("XMEML todavía no exporta effects, enhancements o transitions de la timeline.")
+
+    paths: dict[str, Path] = {}
+    source_rates: dict[str, Fraction] = {}
+    source_metadata: dict[str, dict] = {}
+    resolutions = {}
     interpretations = {}
-    inventory = {m["relative_path"]: m for m in project.media()}
+    inventory = {media["relative_path"]: media for media in project.media()}
     timing_issues = []
-    for c in plan["clips"]:
-        meta = c["metadata"]
-        measured_rate = fps_fraction(meta["fps"])
-        source_rate = override_rate if override_rate is not None else measured_rate
-        try:
-            xml_rate(source_rate)
-        except AutoEditorError as exc:
+    for clip in clips:
+        media_ref = clip["media"]
+        rel = media_ref["relative_path"]
+        metadata = clip["metadata"]
+        audio_enabled = bool(clip["audio"].get("enabled"))
+        original_audio_enabled = bool(timeline.get("audio", {}).get("original_enabled"))
+        if original_audio_enabled and (
+            metadata["audio_channels"] > 2 or metadata.get("audio_streams", 1) > 1
+        ):
             raise AutoEditorError(
-                f"Export paused for {c['relative_path']}: {exc} "
-                "The plan is saved. For a manual Premiere import test, use export with "
-                "--allow-unverified-timing --source-fps RATE to explicitly interpret source timing. "
-                "This does not conform variable-frame-rate media."
-            ) from exc
-        source_rates[c["relative_path"]] = source_rate
-        if override_rate is not None:
-            timing_issues.append(f"source timing explicitly interpreted at {source_rate} fps; VFR not conformed")
-            interpretations[c["relative_path"]] = {
-                "measured_fps": meta["fps"], "nominal_fps": meta.get("nominal_fps"),
-                "xml_fps": str(source_rate), "method": "explicit-source-fps-override",
-            }
-        if source_rate != fps:
-            timing_issues.append("source/sequence frame-rate mismatch")
-        if meta.get("vfr_suspected"):
-            timing_issues.append("potential variable frame rate")
-        if meta["audio_channels"] > 2 or meta.get("audio_streams", 1) > 1:
-            raise AutoEditorError("V1 exports only a first mono/stereo source audio stream. Multistream/surround media needs an extension.")
-        if meta["audio_channels"] and abs(meta.get("audio_start", 0) - meta.get("video_start", 0)) > 1 / float(source_rate):
-            timing_issues.append("audio/video start-time offset")
-        rel = c["relative_path"]
-        if rel not in paths:
-            source = local_media(project.media_root, rel)
-            current = inventory.get(rel)
-            stat = source.stat()
-            needs_hash = (verify_media or not current or current["fingerprint"] != c["fingerprint"]
-                          or stat.st_size != current["size"] or stat.st_mtime_ns != current["mtime_ns"])
-            if needs_hash and file_hash(source) != c["fingerprint"]:
-                raise AutoEditorError(f"Original no longer matches the plan: {rel}. Re-ingest and create a new plan.")
-            paths[rel] = source
-    if timing_issues and not allow_unverified_timing:
-        raise AutoEditorError(
-            "Export paused: " + ", ".join(sorted(set(timing_issues)))
-            + ". Use --allow-unverified-timing only for a Premiere import test; see docs/premiere.md."
+                "La exportación de audio original admite solo el primer stream mono/stereo. "
+                "Use --mute-original si no necesita ese audio."
+            )
+        if rel in paths:
+            continue
+        source = local_media(project.media_root, rel)
+        current = inventory.get(rel)
+        stat = source.stat()
+        needs_hash = (
+            verify_media or not current or current["fingerprint"] != media_ref["fingerprint"]
+            or stat.st_size != current["size"] or stat.st_mtime_ns != current["mtime_ns"]
         )
+        if needs_hash and file_hash(source) != media_ref["fingerprint"]:
+            raise AutoEditorError(f"Original no longer matches the plan: {rel}. Re-ingest and create a new plan.")
+        measured_rate = rate_fraction(clip["source_fps"])
+        if (allow_unverified_timing and source_fps_override is None
+                and not xmeml_representable(measured_rate)):
+            raise AutoEditorError(
+                f"Export paused for {rel}: frame rate {measured_rate} cannot be represented exactly in xmeml. "
+                "Use --allow-unverified-timing --source-fps RATE for the legacy interpretation workflow."
+            )
+        timing_metadata = dict(metadata)
+        timing_metadata["fps"] = str(measured_rate)
+        resolution = resolve_timing(
+            project, source, media_ref["fingerprint"], timing_metadata, fps, timing_mode,
+            audio_enabled, source_fps_override,
+        )
+        paths[rel] = resolution.path
+        source_rates[rel] = resolution.rate
+        source_metadata[rel] = resolution.metadata
+        record = resolution.report(measured_rate)
+        resolutions[rel] = record
+        if resolution.method == "interpret":
+            timing_issues.append(
+                f"source timing explicitly interpreted at {resolution.rate} fps; VFR not conformed"
+            )
+            interpretations[rel] = {
+                "measured_fps": str(measured_rate), "nominal_fps": metadata.get("nominal_fps"),
+                "xml_fps": str(resolution.rate),
+                "method": "explicit-source-fps-override" if source_fps_override else "automatic-interpretation",
+            }
+        elif "conform" in resolution.method:
+            timing_issues.append(
+                f"source conformed to cached CFR {resolution.rate}; original preserved"
+            )
+        elif resolution.rate != fps:
+            timing_issues.append("source/sequence frame-rate mismatch represented by internal timeline")
+
     root = ET.Element("xmeml", {"version": "5"})
-    seq = ET.SubElement(root, "sequence", {"id": plan["id"]})
-    _text(seq, "name", f"{plan['project']} - {plan['id']}")
+    seq = ET.SubElement(root, "sequence", {"id": timeline["timeline_id"]})
+    project_name = timeline.get("metadata", {}).get("project") or "AutoEditor"
+    _text(seq, "name", f"{project_name} - {timeline['timeline_id']}")
     _text(seq, "duration", sequence["duration_frames"])
     _rate(seq, fps)
     _timecode(seq, fps)
@@ -214,55 +243,84 @@ def export_plan(project: Project, plan: dict, output: Path | None = None,
     _text(audio, "numOutputChannels", 2)
     audio_format = ET.SubElement(ET.SubElement(audio, "format"), "samplecharacteristics")
     _text(audio_format, "depth", 16)
-    _text(audio_format, "samplerate", 48000)
+    _text(audio_format, "samplerate", sequence.get("audio_sample_rate", 48000))
     audio_tracks = [ET.SubElement(audio, "track") for _ in range(4)]
     audio_indices = [0, 0, 0, 0]
     defined: set[str] = set()
-    for index, c in enumerate(plan["clips"], start=1):
-        meta = c["metadata"]
-        source_fps = source_rates[c["relative_path"]]
-        args = (c["label"], meta, source_fps, c["timeline_start"], c["timeline_end"], c["source_in"], c["source_out"])
+    for index, clip in enumerate(clips, start=1):
+        rel = clip["media"]["relative_path"]
+        metadata = source_metadata[rel]
+        source_fps = source_rates[rel]
+        timeline_start, timeline_end = timeline_frames(clip)
+        source_in, source_out = source_seconds(clip)
+        editorial = clip["editorial"]
+        args = (
+            editorial["label"], metadata, source_fps, timeline_start, timeline_end,
+            source_in, source_out,
+        )
         v = _clip(video_track, f"v-{index}", *args, "video")
-        _file(v, f"file-{c['media_id']}", paths[c["relative_path"]], meta, source_fps, defined)
-        _fit(v, meta, sequence["width"], sequence["height"])
+        _file(v, f"file-{clip['media_id']}", paths[rel], metadata, source_fps, defined)
+        _fit(v, metadata, sequence["width"], sequence["height"])
         logging = ET.SubElement(v, "logginginfo")
-        _text(logging, "description", f"segment={c['segment_id']}; stage={c['stage']}; confidence={c['confidence']:.2f}")
+        _text(
+            logging, "description",
+            f"segment={clip['segment_id']}; stage={editorial['stage']}; "
+            f"confidence={editorial['confidence']:.2f}",
+        )
         group = [(v, "video", 1, index)]
-        if plan["original_audio"]:
-            for channel in range(meta["audio_channels"]):
+        if clip["audio"].get("enabled"):
+            for channel in range(metadata["audio_channels"]):
                 audio_indices[channel] += 1
-                a = _clip(audio_tracks[channel], f"a-{index}-{channel + 1}", *args, "audio", channel + 1)
-                _file(a, f"file-{c['media_id']}", paths[c["relative_path"]], meta, source_fps, defined)
-                group.append((a, "audio", channel + 1, audio_indices[channel]))
+                item = _clip(
+                    audio_tracks[channel], f"a-{index}-{channel + 1}", *args,
+                    "audio", channel + 1,
+                )
+                _file(
+                    item, f"file-{clip['media_id']}", paths[rel], metadata,
+                    source_fps, defined,
+                )
+                group.append((item, "audio", channel + 1, audio_indices[channel]))
         _links(group)
         marker = ET.SubElement(seq, "marker")
-        _text(marker, "name", f"{c['stage']}: {c['label']}")
-        _text(marker, "in", c["timeline_start"])
+        _text(marker, "name", f"{editorial['stage']}: {editorial['label']}")
+        _text(marker, "in", timeline_start)
         _text(marker, "out", -1)
-        _text(marker, "comment", f"AutoEditor segment {c['segment_id']}; sampled boundary, review the gesture.")
-    if plan.get("music"):
-        music = plan["music"]
-        path = (project.root / music["path"]).resolve()
-        if not path.is_file() or file_hash(path) != music["fingerprint"]:
+        _text(marker, "comment", f"AutoEditor segment {clip['segment_id']}; sampled boundary, review the gesture.")
+
+    timeline_music = music_clips(timeline)
+    for music_index, music_clip in enumerate(timeline_music, start=1):
+        path = (project.root / music_clip["media"]["path"]).resolve()
+        if not path.is_file() or file_hash(path) != music_clip["media"]["fingerprint"]:
             raise AutoEditorError("Music file is missing or changed.")
-        meta = music["metadata"]
-        if not 1 <= meta["audio_channels"] <= 2:
+        metadata = music_clip["metadata"]
+        if not 1 <= metadata["audio_channels"] <= 2:
             raise AutoEditorError("V1 music export supports mono or stereo audio only.")
+        timeline_start, timeline_end = timeline_frames(music_clip)
+        source_in, source_out = source_seconds(music_clip)
         group = []
-        for channel in range(meta["audio_channels"]):
-            a = _clip(audio_tracks[2 + channel], f"music-{channel + 1}", "Music", meta, fps,
-                      0, sequence["duration_frames"], music["offset"], music["offset"] + plan["actual_duration"],
-                      "audio", channel + 1)
-            _file(a, "file-music", path, meta, fps, defined, video=False)
-            group.append((a, "audio", 3 + channel, 1))
+        for channel in range(metadata["audio_channels"]):
+            clip_id = (
+                f"music-{channel + 1}"
+                if len(timeline_music) == 1 else f"music-{music_index}-{channel + 1}"
+            )
+            item = _clip(
+                audio_tracks[2 + channel], clip_id, "Music",
+                metadata, fps, timeline_start, timeline_end, source_in, source_out,
+                "audio", channel + 1,
+            )
+            file_id = "file-music" if len(timeline_music) == 1 else f"file-music-{music_index}"
+            _file(item, file_id, path, metadata, fps, defined, video=False)
+            group.append((item, "audio", 3 + channel, music_index))
         _links(group)
-    # Do not leave trailing empty audio tracks unless they precede an occupied music track.
-    while len(audio_tracks) and not audio_tracks[-1].findall("clipitem"):
+    while audio_tracks and not audio_tracks[-1].findall("clipitem"):
         audio.remove(audio_tracks.pop())
     ET.indent(root, space="  ")
     xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n' + ET.tostring(root, encoding="unicode") + "\n"
-    ET.fromstring(xml)  # Well-formedness check, not a Premiere compatibility claim.
-    destination = output.resolve() if output else project.root / "exports" / f"{plan['id']}.xml"
+    ET.fromstring(xml)
+    destination = (
+        output.resolve()
+        if output else project.root / "exports" / f"{timeline['timeline_id']}.xml"
+    )
     json_path = destination.with_suffix(".json")
     if json_path == project.root / "project.json":
         raise AutoEditorError("Export would overwrite project.json; choose the exports directory.")
@@ -271,9 +329,11 @@ def export_plan(project: Project, plan: dict, output: Path | None = None,
     if not overwrite and (destination.exists() or json_path.exists()):
         raise AutoEditorError("Export already exists. Use a different --output or explicitly --overwrite.")
     report = dict(plan)
+    report["timeline"] = timeline
     report["export_validation"] = {
         "structurally_checked": True, "premiere_import_tested": False,
-        "timing_warnings": sorted(set(timing_issues)),
+        "timing_mode": timing_mode, "timing_warnings": sorted(set(timing_issues)),
+        "timing_resolutions": resolutions,
         "source_rate_interpretations": interpretations,
         "scaling": "fit-with-letterboxing; validate rotation and Basic Motion on import",
     }

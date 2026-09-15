@@ -23,6 +23,7 @@ def catalog_project(tmp_path):
                         "height": 1080, "rotation": 0, "audio_channels": 2 if index % 2 == 0 else 0,
                         "audio_sample_rate": 48000, "audio_streams": 1 if index % 2 == 0 else 0,
                         "audio_start": 0.0, "video_start": 0.0, "vfr_suspected": False,
+                        "timing_check": "synthetic-placeholder-trusted-for-unit-tests",
                         "color_transfer": "bt709", "creation_time": f"2026-01-01T10:{index:02d}:00Z"}
             fingerprint = file_hash(path)
             key = f"analysis-{index}"

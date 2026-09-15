@@ -41,6 +41,8 @@ Original DJI / phone / camera footage
 | Local visual analysis | Timestamped JPEG frames sent to a managed, loopback-only llama.cpp process |
 | Within-clip actions | Multiple candidate intervals accepted from the VLM; boundaries remain estimates |
 | Persistent project | SQLite, old analyses retained, immutable plan snapshots, explicit reject/prefer feedback |
+| Editorial decisions | Stable clip IDs, persisted modes/overrides/property locks and auditable provenance |
+| Editorial operations | Deterministic microcuts, rational retiming/slow motion, sparse transitions and declarative effects |
 | Planning | Soft story preferences, chronological/variety modes, non-overlap and POV limits |
 | Prompts | Local model translates supported directions to a validated, inspectable policy |
 | Music | Optional librosa beat detection, cut alignment, original audio and music on separate tracks |
@@ -113,10 +115,11 @@ The project can contain many files. Start with a **small real sample** before pr
 Default analysis uses 8-second windows with a 6-second stride, sampling every 0.5 seconds and
 sending up to 8 frames per window. This is coarse action localization, not full video understanding.
 
-**Important:** V1 deliberately stops normal XML export on mixed source/sequence FPS, suspected
-VFR, or significant audio/video start-time offsets. The plan remains saved in SQLite. For a
-controlled import test, run `export --allow-unverified-timing`; do not assume frame accuracy.
-Choose the sequence FPS that actually matches the footage. See [Premiere notes](docs/premiere.md).
+**Important:** `--timing auto` is now the default. It verifies CFR/VFR timing and creates a cached
+CFR derivative only when needed, without modifying originals or discarding high-FPS frames.
+`strict`, `interpret`, and `conform` remain explicit alternatives. Actual Premiere import is still
+an acceptance gate. See the Spanish [timing guide](docs/timing.md) and
+[Premiere checklist](docs/premiere.md).
 
 A 9:16 sequence uses `--width 1080 --height 1920`. V1 fits footage with letterboxing; it does not
 intelligently crop, follow subjects, or apply an automatic cinematic look.
@@ -185,6 +188,12 @@ python -m build
 CI is configured for Windows/Linux and Python 3.11/3.13. FFmpeg integration tests run on Linux;
 Windows jobs run them only when FFmpeg is available. CI does not have a GPU or Premiere.
 See [validation evidence](docs/validation.md), [contributing](CONTRIBUTING.md), and [publishing](docs/publishing.md).
+
+The common decisions contract is documented in Spanish in
+[decisiones editoriales](docs/decisiones-editoriales.md). Its consumers include
+[microcuts](docs/microcuts.md) and
+[retiming, slow motion, transitions and effects](docs/retiming-transiciones-efectos.md).
+Denoise, stabilization, night enhancement and color operations remain unimplemented.
 
 ## License and independence
 

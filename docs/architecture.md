@@ -13,9 +13,16 @@ The code is intentionally split into small modules:
 | `analysis.py` | Sliding windows, cached thumbnails, resumable temporal analysis |
 | `vision.py` | Managed local inference, timestamped images, strict output validation |
 | `project.py` | SQLite schema, backups, feedback, project/media-root management |
-| `planner.py` | Policy compilation/validation, deterministic selection, immutable decisions |
+| `decisions.py` | IDs estables, decisiones append-only, locks, overrides y resolución |
+| `microcuts.py` | Consumidor determinista de decisiones: saltos internos e hijos de timeline |
+| `retiming.py` | Retiming racional, slow motion seguro y selección de regiones |
+| `editorial_features.py` | Transiciones y efectos declarativos desacoplados del exporter |
+| `profiles.py` | Perfiles declarativos, validación y composición explícita de políticas |
+| `planner.py` | Selección determinista V2, duración variable, diversidad global y snapshots inmutables |
 | `audio.py` | Optional song analysis and beat cache |
-| `export.py` | Legacy xmeml serialization, media validation, audio links, markers |
+| `timeline.py` | Timeline interna canónica, tasas/tiempos racionales e invariantes |
+| `timing.py` | Políticas CFR/VFR, inspección temporal y cache de conformado |
+| `export.py` | Adaptador xmeml, validación de media, enlaces de audio y marcadores |
 | `cli.py` | User-facing foreground commands |
 
 ## Why no Compose or ComfyUI
@@ -57,6 +64,11 @@ The model's confidence and interest values are **not calibrated probabilities**.
 and source timestamps. `feedback` is an append-only history of explicit user judgments.
 `plans` stores immutable JSON snapshots of complete edit decisions, policies and provenance.
 
+El schema V2 añade `clip_identities` y `editorial_decisions`. La primera tabla desacopla la
+identidad `clip-001` del orden de una timeline/export. La segunda conserva eventos append-only con
+target, propiedades, procedencia, locks/unlocks y relaciones entre propuestas automáticas y
+respuestas hybrid. Abrir un proyecto V1 ejecuta una migración aditiva; no reescribe sus planes.
+
 A new model signature or relevant analysis setting creates a new analysis, not an in-place
 rewrite. The previous completed analysis remains active while the new one is incomplete.
 If footage changes, ingest invalidates its active analysis but retains historical records.
@@ -70,28 +82,48 @@ The model signature uses the configured revision and binary/model file size and 
 full multi-gigabyte weight hash each run. Change `model_revision` after replacing/requantizing
 weights. Pin and independently verify your downloaded model artifacts for reproducible work.
 
-## Planner boundaries
+## Límites del planner
 
-The current planner is greedy and deterministic. Presets are soft preferences, not rigid
-storyboards. It uses model labels only when available. It enforces source bounds, timeline
-continuity, no reuse of overlapping chosen material, a maximum POV budget and optional
-chronological ordering. It can return a shorter result rather than invent clips or loop footage.
+Planner V2 sigue siendo greedy y determinista; no es un optimizador narrativo global ni un editor
+cinematográfico aprendido. Calcula duraciones variables por candidato, acepta material más corto
+que la duración preferida cuando respeta el mínimo, y redistribuye frames entre clips completos
+para cerrar el target sin fabricar un residual submínimo.
 
-Opening and closing stages are preferences, not guaranteed constraints. A requirement to
-place a particular action on a particular musical beat is not yet supported. The current prompt
-compiler reports unsupported requests. This is not yet a global graph optimizer or learned
-cinematic editor.
+La diversidad considera todo el historial de medios, planos, etapas, etiquetas y similitud visual.
+Los presets, perfiles de prioridad, intent, prompt y CLI se combinan con precedencia explícita.
+`max_clips_per_media` solo se relaja con un aviso si no queda otra alternativa; los presupuestos
+de POV y primeros planos son límites duros. Véase [Planner V2](planner-v2.md).
 
-Chronology uses camera dates, then filenames and segment offsets. Camera clocks can disagree;
-there is no synchronization or continuity solver. The story ordering is a weak narrative prior,
-not a conclusion about the real sequence of events.
+Las etapas inicial/final siguen siendo preferencias, no constraints garantizadas. Colocar una
+acción concreta en un beat concreto continúa sin estar soportado. La cronología usa fecha de
+cámara, nombre y offset; no existe todavía sincronización de relojes ni solver de continuidad.
 
 ## Exactness, portability and storage
 
-Sequence timing uses integer frames with rational frame rates. XML source durations are rounded
-once so independent endpoint rounding cannot create an accidental extra frame. Mixed FPS/VFR
-are gated for manual validation. Sampled action boundaries remain approximate regardless of
-numeric timestamp precision.
+La timeline interna es la fuente de verdad y no depende de XMEML. Usa frames enteros para rangos
+de secuencia y fracciones exactas de segundo/FPS para rangos de origen. Representa IDs de clip y
+media, audio, música y espacios progresivos para retiming, transiciones, efectos, mejoras y color.
+Los planes antiguos sin timeline se adaptan en memoria; no se migra ni elimina su snapshot.
+
+El exportador XMEML consume esa timeline mediante una dependencia unidireccional y rechaza de
+forma explícita campos que todavía no sabe serializar. `timing.py` decide si usa el original, lo
+interpreta o crea una derivada CFR cacheada. Las duraciones XML se redondean una sola vez para
+evitar frames extra por redondeo independiente. Los límites semánticos muestreados siguen siendo
+aproximados aunque la representación numérica sea exacta.
+
+La dirección para decisiones es
+`project/SQLite → decisions → planner → microcuts → retiming → transitions/effects → timeline snapshot`.
+Los exporters leen la timeline y no consultan ni modifican la tabla de decisiones. Los futuros
+consumidores reciben exclusivamente la vista efectiva ya resuelta. La precedencia es manual
+bloqueada, override manual, hybrid aceptada/modificada, automática y defaults. Un target ausente
+queda marcado como no resuelto y sigue persistido.
+
+Microcuts es el primer consumidor: transforma un clip lógico en hijos que conservan `parent_clip_id`,
+media, rangos racionales y procedencia. La suma de sus frames se mantiene igual al padre lógico; el
+tiempo fuente eliminado se compensa solo con cobertura contigua libre. El contrato implementado es
+`selection → microcuts → retiming → transitions → effects`. Retiming conserva el presupuesto de
+frames consumiendo menos fuente; la música no cambia. Transiciones y efectos describen intención
+sin alterar rangos. El snapshot conserva procedencia y los exporters siguen siendo lectores.
 
 Projects use a relative media root where possible. Across Windows drives an absolute root may
 be necessary; `relink` checks the replacement files' full content hashes before changing the root.
@@ -99,7 +131,7 @@ SQLite contains no media. Backups must also include the project configuration an
 
 The default thumbnail budget is 2 GiB, with a hard stop rather than unlimited writes. Temporary
 sampling is streamed; JPEG previews are retained for restartability. `clean-cache --yes` removes
-derived files, not completed predictions. An interrupted incomplete analysis may need to decode
-a video again if its thumbnail cache was incomplete or deleted.
+thumbnails, audio analysis and conformed media derivatives, not completed predictions or originals.
+Exports that reference a conformed cache file must be regenerated after cleaning that cache.
 
 No embeddings, learned preference model, generated video, or image denoiser is hidden in the V1.

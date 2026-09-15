@@ -30,6 +30,9 @@ autoeditor = "autoeditor_local.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+autoeditor_local = ["priority_profiles.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

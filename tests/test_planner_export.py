@@ -157,25 +157,25 @@ def test_refuse_changed_source(catalog_project):
         export_plan(catalog_project, plan)
 
 
-def test_mixed_rates_require_opt_in(catalog_project):
+def test_mixed_rates_auto_and_strict(catalog_project):
     plan = create_plan(catalog_project, duration=4, fps="24")
     with pytest.raises(AutoEditorError, match="frame-rate mismatch"):
-        export_plan(catalog_project, plan)
-    xml, report = export_plan(catalog_project, plan, allow_unverified_timing=True)
+        export_plan(catalog_project, plan, timing="strict")
+    xml, report = export_plan(catalog_project, plan)
     assert xml.exists()
     assert json.loads(report.read_text())["export_validation"]["timing_warnings"]
 
 
-def test_vfr_requires_opt_in(catalog_project):
+def test_strict_rejects_vfr(catalog_project):
     plan = create_plan(catalog_project, duration=4)
-    plan["clips"][0]["metadata"]["vfr_suspected"] = True
+    plan["timeline"]["video_tracks"][0]["clips"][0]["metadata"]["vfr_suspected"] = True
     with pytest.raises(AutoEditorError, match="variable frame rate"):
-        export_plan(catalog_project, plan)
+        export_plan(catalog_project, plan, timing="strict")
 
 
 def test_multichannel_is_explicitly_unsupported(catalog_project):
     plan = create_plan(catalog_project, duration=4)
-    plan["clips"][0]["metadata"]["audio_channels"] = 6
+    plan["timeline"]["video_tracks"][0]["clips"][0]["metadata"]["audio_channels"] = 6
     with pytest.raises(AutoEditorError, match="mono/stereo"):
         export_plan(catalog_project, plan)
 
@@ -190,16 +190,21 @@ def test_no_accidental_speed_change_in_xml(catalog_project):
 
 def test_unrepresentable_source_rate_explains_recovery(catalog_project):
     plan = create_plan(catalog_project, duration=4)
-    plan["clips"][0]["metadata"]["fps"] = "742343/24665"
-    for allow in (False, True):
-        with pytest.raises(AutoEditorError, match="--source-fps RATE"):
-            export_plan(catalog_project, plan, allow_unverified_timing=allow)
+    canonical = plan["timeline"]["video_tracks"][0]["clips"][0]
+    canonical["metadata"]["fps"] = "742343/24665"
+    canonical["source_fps"] = {
+        "numerator": 742343, "denominator": 24665,
+    }
+    with pytest.raises(AutoEditorError, match="not exactly representable"):
+        export_plan(catalog_project, plan, timing="strict")
+    with pytest.raises(AutoEditorError, match="--source-fps RATE"):
+        export_plan(catalog_project, plan, allow_unverified_timing=True)
     assert not list((catalog_project.root / "exports").glob("*.xml"))
 
 
 def test_source_rate_override_requires_explicit_trial(catalog_project):
     plan = create_plan(catalog_project, duration=4)
-    with pytest.raises(AutoEditorError, match="requires --allow-unverified-timing"):
+    with pytest.raises(AutoEditorError, match="--timing interpret"):
         export_plan(catalog_project, plan, source_fps_override="30")
     with pytest.raises(AutoEditorError, match="cannot be represented"):
         export_plan(catalog_project, plan, allow_unverified_timing=True, source_fps_override="742343/24665")
